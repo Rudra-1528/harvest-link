@@ -33,15 +33,19 @@ const haversineKm = (a, b) => {
   return 2 * R * Math.asin(Math.sqrt(h));
 };
 
+const normalizeTruckId = (id) => String(id || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+const isHeroTruckId = (truckId) => normalizeTruckId(truckId).startsWith('GJ01');
+
 const DriverNavigation = () => {
   const [liveData, setLiveData] = useState({});
   const [lastUpdated, setLastUpdated] = useState(0);
+  const [deviceLocation, setDeviceLocation] = useState(null);
 
   const destination = [23.215, 72.636];
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'shipments'), (snap) => {
-      const doc = snap.docs.find((d) => d.data().truck_id === 'GJ-01-LIVE');
+      const doc = snap.docs.find((d) => isHeroTruckId(d.data().truck_id));
       if (doc) {
         const data = doc.data();
         setLiveData(data);
@@ -51,17 +55,35 @@ const DriverNavigation = () => {
     return () => unsub();
   }, []);
 
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const lat = Number(pos?.coords?.latitude);
+        const lng = Number(pos?.coords?.longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          setDeviceLocation({ lat, lng });
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, []);
+
   const heroPosition = useMemo(() => {
     const lat = liveData.lat ?? liveData.latitude ?? liveData._lat ?? liveData._latitude 
               ?? liveData.location?.lat ?? liveData.location?.latitude ?? liveData.location?._lat ?? liveData.location?._latitude 
-              ?? 23.076;
+              ?? 26.2521;
     const lng = liveData.lng ?? liveData.lon ?? liveData.longitude ?? liveData._lng ?? liveData._longitude 
               ?? liveData.location?.lng ?? liveData.location?.lon ?? liveData.location?.longitude ?? liveData.location?._lng ?? liveData.location?._longitude 
-              ?? 72.846;
-    const safeLat = Number(lat) || 23.076;
-    const safeLng = Number(lng) || 72.846;
+              ?? 78.1760;
+    const safeLat = Number(lat) || deviceLocation?.lat || 26.2521;
+    const safeLng = Number(lng) || deviceLocation?.lng || 78.1760;
     return [safeLat, safeLng];
-  }, [liveData]);
+  }, [liveData, deviceLocation]);
 
   const isOffline = useMemo(() => Date.now() - lastUpdated > 20000, [lastUpdated]);
 

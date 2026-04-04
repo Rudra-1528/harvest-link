@@ -24,6 +24,24 @@ const truckIconOffline = new L.Icon({
     className: 'grayscale-icon'
 });
 
+const HERO_FALLBACK_COORDS = { lat: 26.2521, lng: 78.1760 }; // IIITM Visitor Hostel
+
+const normalizeTruckId = (id) => String(id || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+const isHeroTruckId = (truckId) => normalizeTruckId(truckId).startsWith('GJ01');
+
+const findHeroTruckKey = (liveDataMap) => {
+  const keys = Object.keys(liveDataMap || {});
+  if (!keys.length) return null;
+
+  const heroCandidates = keys.filter(isHeroTruckId);
+  if (!heroCandidates.length) return null;
+
+  const livePreferred = heroCandidates.find((key) => normalizeTruckId(key).includes('LIVE'));
+  if (livePreferred) return livePreferred;
+
+  return heroCandidates[0];
+};
+
 const Fleet = () => {
   const { lang, isMobile } = useOutletContext(); 
   const location = useLocation();
@@ -34,6 +52,7 @@ const Fleet = () => {
   const [currentTime, setCurrentTime] = useState(Date.now()); 
   // FIX 1: Store raw data separately to prevent connection resets
   const [liveDataMap, setLiveDataMap] = useState({}); 
+  const [deviceLocation, setDeviceLocation] = useState(null);
 
   const toLatLngString = (location, fallback) => {
     if (!location) return fallback;
@@ -107,6 +126,24 @@ const Fleet = () => {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const lat = Number(pos?.coords?.latitude);
+        const lng = Number(pos?.coords?.longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          setDeviceLocation({ lat, lng });
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, []);
+
   // --- FIX 4: MERGE DATA ON THE FLY ---
   const fleetData = useMemo(() => {
       
@@ -136,27 +173,30 @@ const Fleet = () => {
       });
 
       // B. Process HERO TRUCK (GJ-01-LIVE)
-      const heroLive = liveDataMap["GJ-01-LIVE"];
+      const heroTruckKey = findHeroTruckKey(liveDataMap);
+      const heroLive = heroTruckKey ? liveDataMap[heroTruckKey] : null;
       const heroLastUpdate = heroLive && heroLive.last_updated ? Number(heroLive.last_updated) : 0;
-      const isHeroOffline = (currentTime - heroLastUpdate) > 20000;
+      const isHeroOffline = heroLive ? (currentTime - heroLastUpdate) > 20000 : false;
+      const heroCoords = deviceLocation || HERO_FALLBACK_COORDS;
+      const heroLocationString = `${heroCoords.lat.toFixed(4)}, ${heroCoords.lng.toFixed(4)}`;
 
       const heroTruck = {
-        id: "GJ-01-LIVE",
+        id: heroTruckKey || "GJ-01",
         driver: "Rohit Sharma", 
         driverId: "DRV-999",
         phone: "+916204773940", 
         img: "https://randomuser.me/api/portraits/men/75.jpg",
-        route: "Lavad → Gandhinagar",
+        route: "Current Location → Gandhinagar",
         
         status: isHeroOffline ? "Signal Lost" : (heroLive?.status || "Active"),
-        location: heroLive && heroLive.location ? toLatLngString(heroLive.location, "23.0760, 72.8460") : "23.0760, 72.8460",
+        location: heroLocationString,
         battery: isHeroOffline ? 0 : 92,
         signal: isHeroOffline ? "Offline" : "Strong"
       };
 
       return [heroTruck, ...mergedStatic];
 
-  }, [liveDataMap, currentTime]); // Re-runs ONLY when data arrives OR time changes
+  }, [liveDataMap, currentTime, deviceLocation]); // Re-runs ONLY when data arrives OR time changes
 
   const handleCall = (name, number) => {
     const cleanNumber = number.replace(/\s/g, '');

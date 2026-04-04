@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, Menu, X, LogOut, Globe, AlertTriangle, Thermometer, Droplets, Zap, WifiOff } from 'lucide-react';
 import TransporterSidebar from './TransporterSidebar';
@@ -20,7 +20,26 @@ const TransporterWrapper = ({ lang, setLang }) => {
   const [selectedLangForModal, setSelectedLangForModal] = useState(null);
   const [savedAsDefault, setSavedAsDefault] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const notificationRef = useRef(null);
   const auth = translations.auth?.[lang] || translations.auth?.en || {};
+
+  useEffect(() => {
+    if (!showNotifications) return;
+
+    const handleOutsideClick = (event) => {
+      if (notificationRef.current && !notificationRef.current.contains(event.target)) {
+        setShowNotifications(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
+
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, [showNotifications]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -189,7 +208,7 @@ const TransporterWrapper = ({ lang, setLang }) => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '10px' : '15px' }}>
-            <div style={{ position: 'relative' }}>
+            <div ref={notificationRef} style={{ position: 'relative' }}>
               <div onClick={() => setShowNotifications(!showNotifications)} style={{ cursor: 'pointer', color: '#5d4037', position: 'relative' }}>
                 <Bell size={isMobile ? 20 : 22} />
                 {unreadCount > 0 && (

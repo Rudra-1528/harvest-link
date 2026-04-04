@@ -77,6 +77,11 @@ const TripHistory = ({ lang = 'en', isOpen, onClose, translations = {} }) => {
     }
   }, [isOpen]);
 
+  // Sync language prop to selectedLang state when lang prop changes
+  useEffect(() => {
+    setSelectedLang(lang);
+  }, [lang]);
+
   // Filter trips by date range when dates change
   useEffect(() => {
     if (trips.length > 0) {

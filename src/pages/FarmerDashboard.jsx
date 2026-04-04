@@ -40,9 +40,26 @@ const heroIcon = new L.Icon({
   popupAnchor: [0, -10],
 });
 
+const normalizeTruckId = (id) => String(id || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+const isHeroTruckId = (truckId) => normalizeTruckId(truckId).startsWith('GJ01');
+
+const findHeroTruckKey = (liveDataMap) => {
+  const keys = Object.keys(liveDataMap || {});
+  if (!keys.length) return null;
+
+  const heroCandidates = keys.filter(isHeroTruckId);
+  if (!heroCandidates.length) return null;
+
+  const livePreferred = heroCandidates.find((key) => normalizeTruckId(key).includes('LIVE'));
+  if (livePreferred) return livePreferred;
+
+  return heroCandidates[0];
+};
+
 const FarmerDashboard = () => {
   const [currentTime, setCurrentTime] = useState(Date.now()); 
   const [liveDataMap, setLiveDataMap] = useState({});
+  const [deviceLocation, setDeviceLocation] = useState(null);
   const { notifications } = useNotifications();
   const { lang } = useOutletContext();
   const t = translations.dashboard?.[lang] || translations.dashboard?.['en'] || {};
@@ -65,19 +82,41 @@ const FarmerDashboard = () => {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const lat = Number(pos?.coords?.latitude);
+        const lng = Number(pos?.coords?.longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          setDeviceLocation({ lat, lng });
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, []);
+
   // --- 4. CALCULATE STATUS (useMemo) ---
   const trucks = useMemo(() => {
       // A. Process HERO TRUCK (GJ-01-LIVE)
-      const heroLive = liveDataMap["GJ-01-LIVE"];
+      const heroTruckKey = findHeroTruckKey(liveDataMap);
+      const heroLive = heroTruckKey ? liveDataMap[heroTruckKey] : null;
       const lastUpdate = heroLive && heroLive.last_updated ? Number(heroLive.last_updated) : 0;
+      const hasHeroLive = Boolean(heroLive);
       
       // 20 Second Timeout Logic
-      const isOffline = (currentTime - lastUpdate) > 20000;
+      const isOffline = hasHeroLive ? (currentTime - lastUpdate) > 20000 : false;
+      const heroLabel = heroTruckKey || 'GJ-01';
+      const heroRouteStart = hasHeroLive || deviceLocation ? 'Current Location' : 'IIITM Gwalior';
 
       const heroTruck = {
-          id: "GJ-01-LIVE",
-          truck_id: "GJ-01-LIVE",
-          route: "Lavad → Gandhinagar",
+        id: heroLabel,
+        truck_id: heroLabel,
+          route: `${heroRouteStart} → Gandhinagar`,
           crop: "Fresh Tomatoes 🍅",
           
           // Force Offline Values if Timed Out
@@ -93,7 +132,7 @@ const FarmerDashboard = () => {
       
       return [heroTruck, ...processedStatic];
 
-  }, [liveDataMap, currentTime]);
+  }, [liveDataMap, currentTime, deviceLocation]);
 
   const dummyAlerts = useMemo(() => ([
     { id: 'dummy-temp', title: `VAC13143 • ${t.tempSpiked || 'High Temp'}`, detail: t.tempHigh || 'Spiked to 31°C near Nashik', status: t.critical || 'Critical', icon: <Thermometer size={16} color="#d32f2f" /> },
@@ -114,17 +153,20 @@ const FarmerDashboard = () => {
   const combinedAlerts = useMemo(() => [...liveAlerts, ...dummyAlerts], [liveAlerts, dummyAlerts]);
 
   const heroPosition = useMemo(() => {
-    const hero = liveDataMap["GJ-01-LIVE"] || {};
+    const heroTruckKey = findHeroTruckKey(liveDataMap);
+    const hero = (heroTruckKey ? liveDataMap[heroTruckKey] : null) || {};
     const lat = hero.lat ?? hero.latitude ?? hero._lat ?? hero._latitude 
               ?? hero.location?.lat ?? hero.location?.latitude ?? hero.location?._lat ?? hero.location?._latitude 
-              ?? 23.076;
+              ?? deviceLocation?.lat
+              ?? 26.2521;
     const lng = hero.lng ?? hero.lon ?? hero.longitude ?? hero._lng ?? hero._longitude 
               ?? hero.location?.lng ?? hero.location?.lon ?? hero.location?.longitude ?? hero.location?._lng ?? hero.location?._longitude 
-              ?? 72.846;
-    const safeLat = Number(lat) || 23.076;
-    const safeLng = Number(lng) || 72.846;
+              ?? deviceLocation?.lng
+              ?? 78.1760;
+    const safeLat = Number(lat) || deviceLocation?.lat || 26.2521;
+    const safeLng = Number(lng) || deviceLocation?.lng || 78.1760;
     return [safeLat, safeLng];
-  }, [liveDataMap]);
+  }, [liveDataMap, deviceLocation]);
 
   return (
     <div style={{ padding: '20px', background: '#f5f7f6', minHeight: '100vh', fontFamily: 'Arial, sans-serif' }}>

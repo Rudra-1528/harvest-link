@@ -25,14 +25,28 @@ const warehouseIcon = new L.Icon({
     popupAnchor: [0, -35] 
 });
 
+const normalizeTruckId = (id) => String(id || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+const isHeroTruckId = (truckId) => normalizeTruckId(truckId).startsWith('GJ01');
+
+const extractLatLng = (docData) => {
+    const source = docData?.location || docData;
+    const lat = Number(source?.lat ?? source?.latitude ?? source?._lat ?? source?._latitude);
+    const lng = Number(source?.lng ?? source?.lon ?? source?.longitude ?? source?._lng ?? source?._longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return [lat, lng];
+};
+
 const DriverDashboard = () => {
-    const startCoords = [23.076, 72.846]; // Lavad
-    const endCoords = [23.215, 72.636];   // Gandhinagar
+    const defaultStartCoords = [26.2521, 78.1760]; // Fallback IIITM Gwalior (Visitor Hostel)
+    const endCoords = [23.215, 72.636];   // Gandhinagar (Fixed)
     
     // Toggle for Analysis Card
     const [showAnalysis, setShowAnalysis] = useState(true);
     const { lang, isMobile, isSidebarOpen } = useOutletContext();
     const [documents, setDocuments] = useState([]);
+    const [liveLocation, setLiveLocation] = useState(defaultStartCoords);
+    const [currentTime, setCurrentTime] = useState(Date.now());
+    const [heroTruckLabel, setHeroTruckLabel] = useState('GJ-01');
     
     // AI Route Intelligence State
     const [routeData, setRouteData] = useState({
@@ -51,7 +65,7 @@ const DriverDashboard = () => {
         const currentHour = now.getHours();
         const currentMin = now.getMinutes();
         
-        // Base metrics for Lavad → Gandhinagar (approximately 8-10 km, 15-20 mins)
+        // Base metrics for current location → Gandhinagar
         let estTime = 18;
         let trafficStatus = "Low (Clear)";
         let riskLevel = "SAFE";
@@ -135,6 +149,47 @@ const DriverDashboard = () => {
         };
     };
 
+    // Fetch live location from Firestore (GJ-01 variations)
+    useEffect(() => {
+        const unsubscribe = onSnapshot(collection(db, 'shipments'), (snapshot) => {
+            snapshot.docs.forEach((doc) => {
+                const data = doc.data();
+                if (isHeroTruckId(data?.truck_id)) {
+                    setHeroTruckLabel(data.truck_id || 'GJ-01');
+                    const coords = extractLatLng(data);
+                    if (coords) {
+                        setLiveLocation(coords);
+                    }
+                }
+            });
+        });
+        return () => unsubscribe();
+    }, []);
+
+    useEffect(() => {
+        if (!navigator.geolocation) return;
+
+        const watchId = navigator.geolocation.watchPosition(
+            (pos) => {
+                const lat = Number(pos?.coords?.latitude);
+                const lng = Number(pos?.coords?.longitude);
+                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    setLiveLocation([lat, lng]);
+                }
+            },
+            () => {},
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+        );
+
+        return () => navigator.geolocation.clearWatch(watchId);
+    }, []);
+
+    // Timer to update currentTime every 500ms (for offline check)
+    useEffect(() => {
+        const timer = setInterval(() => setCurrentTime(Date.now()), 500);
+        return () => clearInterval(timer);
+    }, []);
+
     // Fetch documents from Firestore
     useEffect(() => {
         const unsubscribe = onSnapshot(collection(db, 'driver_documents'), (snapshot) => {
@@ -180,24 +235,24 @@ const DriverDashboard = () => {
       <div style={{ flex: 1.5, position: 'relative', minHeight: '60%' }}>
             {/* key forces the polyline to rerender if coords change in future */}
             <MapContainer 
-                key={`driver-map-${startCoords[0]}-${startCoords[1]}-${endCoords[0]}-${endCoords[1]}`}
-                center={startCoords}
+                key={`driver-map-${liveLocation[0]}-${liveLocation[1]}-${endCoords[0]}-${endCoords[1]}`}
+                center={liveLocation}
                 zoom={11}
-                whenReady={(mapEvent) => mapEvent.target.fitBounds([startCoords, endCoords], { padding: [40, 40] })}
+                whenReady={(mapEvent) => mapEvent.target.fitBounds([liveLocation, endCoords], { padding: [40, 40] })}
                 style={{ height: '100%', width: '100%' }} zoomControl={false}>
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             
-            {/* THE GREEN ROUTE LINE (Admin Style) */}
-                <RoutingMachine start={startCoords} end={endCoords} />
+            {/* THE GREEN ROUTE LINE - From LIVE Location to Gandhinagar */}
+                <RoutingMachine start={liveLocation} end={endCoords} />
 
-            {/* MY TRUCK ONLY */}
-            <Marker position={[23.076, 72.846]} icon={myTruckIcon}>
-               <Popup><strong>YOU (GJ-01-LIVE)</strong><br/>Status: On Route</Popup>
+            {/* MY TRUCK - LIVE LOCATION */}
+            <Marker position={liveLocation} icon={myTruckIcon}>
+                    <Popup><strong>YOU ({heroTruckLabel})</strong><br/>Status: On Route<br/>Lat: {liveLocation[0].toFixed(3)}, Lng: {liveLocation[1].toFixed(3)}</Popup>
             </Marker>
 
             {/* DESTINATION */}
-            <Marker position={[23.215, 72.636]} icon={warehouseIcon}>
-               <Popup>Gandhinagar Warehouse</Popup>
+                <Marker position={endCoords} icon={warehouseIcon}>
+                    <Popup>Gandhinagar Warehouse</Popup>
             </Marker>
 
          </MapContainer>
@@ -208,8 +263,8 @@ const DriverDashboard = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '8px' : '12px', flex: 1, minWidth: 0 }}>
                 <div style={{ background: '#e8f5e9', padding: isMobile ? '8px' : '10px', borderRadius: '50%', flexShrink: 0 }}><Navigation color="#2e7d32" size={isMobile ? 16 : 20} /></div>
                 <div style={{ minWidth: 0, flex: 1 }}>
-                   <div style={{ fontSize: isMobile ? '9px' : '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Current Trip</div>
-                   <div style={{ fontWeight: 'bold', fontSize: isMobile ? '12px' : '15px', color: '#1b5e20', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Lavad → Gandhinagar</div>
+                   <div style={{ fontSize: isMobile ? '9px' : '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Current Trip (Live GPS)</div>
+                   <div style={{ fontWeight: 'bold', fontSize: isMobile ? '12px' : '15px', color: '#1b5e20', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Current Location → Gandhinagar</div>
                 </div>
             </div>
             <button onClick={() => setShowAnalysis(!showAnalysis)} style={{ background: '#333', color: 'white', border: 'none', padding: isMobile ? '5px 10px' : '6px 12px', borderRadius: '6px', fontSize: isMobile ? '10px' : '11px', fontWeight: 'bold', flexShrink: 0, marginLeft: '8px' }}>

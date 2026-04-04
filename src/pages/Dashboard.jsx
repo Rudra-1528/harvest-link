@@ -42,7 +42,28 @@ const warehouseIcon = new L.Icon({
     popupAnchor: [0, -30] 
 });
 
-const WAREHOUSE_LOCATION = [23.215, 72.636]; 
+const WAREHOUSE_LOCATION = [23.215, 72.636];
+const HERO_DEFAULT_LOCATION = { lat: 26.2521, lng: 78.1760 };
+
+const normalizeTruckId = (id) => String(id || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+
+const isHeroTruckId = (truckId) => {
+    const normalized = normalizeTruckId(truckId);
+    return normalized.startsWith('GJ01');
+};
+
+const findHeroTruckKey = (liveDataMap) => {
+    const keys = Object.keys(liveDataMap || {});
+    if (!keys.length) return null;
+
+    const heroCandidates = keys.filter(isHeroTruckId);
+    if (!heroCandidates.length) return null;
+
+    const livePreferred = heroCandidates.find((key) => normalizeTruckId(key).includes('LIVE'));
+    if (livePreferred) return livePreferred;
+
+    return heroCandidates[0];
+};
 
 const toLatLng = (location, fallback) => {
     if (!location) return fallback;
@@ -93,6 +114,7 @@ const Dashboard = () => {
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [liveDataMap, setLiveDataMap] = useState({});
   const [selectedTruckId, setSelectedTruckId] = useState("GJ-01-LIVE");
+    const [deviceLocation, setDeviceLocation] = useState(null);
 
   const translateCity = (city) => {
     if (translations.cities[city] && translations.cities[city][lang]) {
@@ -121,6 +143,24 @@ const Dashboard = () => {
     return () => clearInterval(timer);
   }, []);
 
+    useEffect(() => {
+        if (!navigator.geolocation) return;
+
+        const watchId = navigator.geolocation.watchPosition(
+            (pos) => {
+                const lat = Number(pos?.coords?.latitude);
+                const lng = Number(pos?.coords?.longitude);
+                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    setDeviceLocation({ lat, lng, lastUpdated: Date.now() });
+                }
+            },
+            () => {},
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+        );
+
+        return () => navigator.geolocation.clearWatch(watchId);
+    }, []);
+
   // 3. PROCESS DATA (Merge Live + Static)
   const trucks = useMemo(() => {
       // Process Static
@@ -139,17 +179,21 @@ const Dashboard = () => {
       });
 
       // Process Hero
-      const heroLive = liveDataMap["GJ-01-LIVE"];
+            const heroTruckKey = findHeroTruckKey(liveDataMap);
+            const heroLive = heroTruckKey ? liveDataMap[heroTruckKey] : null;
       const lastUpdate = heroLive?.last_updated ? Number(heroLive.last_updated) : 0;
-      const isHeroOffline = (currentTime - lastUpdate) > 20000; // 20s Timeout
+            const hasHeroLive = Boolean(heroLive);
+            const isHeroOffline = hasHeroLive ? (currentTime - lastUpdate) > 20000 : false; // 20s Timeout
+            const heroLocation = deviceLocation || HERO_DEFAULT_LOCATION;
+            const heroStartCity = "Current Location";
 
       const heroTruck = {
-        id: "GJ-01-LIVE",
-        startCity: "Lavad",
+                id: heroTruckKey || "GJ-01",
+                startCity: heroStartCity,
         endCity: "Gandhinagar",
         destCoords: WAREHOUSE_LOCATION,
-        status: isHeroOffline ? "Signal Lost" : (heroLive?.status || "Active"),
-        location: toLatLng(heroLive?.location, { lat: 23.076, lng: 72.846 }),
+                status: isHeroOffline ? "Signal Lost" : (heroLive?.status || (deviceLocation ? "Live (Device GPS)" : "Active")),
+                location: heroLocation,
         sensors: isHeroOffline ? { temp: 0, humidity: 0 } : (heroLive?.sensors || { temp: 0, humidity: 0 }),
         shock: isHeroOffline ? 0 : Math.min(heroLive?.shock || 0, 2.5),
         rotation: isHeroOffline ? 0 : (heroLive?.rotation || 0),
@@ -157,11 +201,12 @@ const Dashboard = () => {
       };
 
       return [heroTruck, ...processedStatic];
-  }, [liveDataMap, currentTime]);
+    }, [liveDataMap, currentTime, deviceLocation]);
 
   const selectedTruck = trucks.find(t => t.id === selectedTruckId) || trucks[0];
   const currentHealth = !selectedTruck.isOffline ? (100 - (selectedTruck.status === 'At Risk' ? 40 : 0)) : 0;
-  const isGlobalOnline = !trucks.find(t => t.id === "GJ-01-LIVE")?.isOffline;
+    const heroTruck = trucks[0];
+    const isGlobalOnline = heroTruck ? !heroTruck.isOffline : false;
 
   // 4. MEMOIZE ROUTE COORDINATES (Fixes the Flashing Map Issue)
   const routeStart = useMemo(() => {

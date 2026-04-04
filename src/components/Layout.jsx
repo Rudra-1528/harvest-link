@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './Sidebar';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, Menu, X, LogOut, Globe, AlertTriangle, Thermometer, Droplets, Zap, WifiOff } from 'lucide-react';
@@ -21,9 +21,28 @@ const Layout = () => {
   const [selectedLangForModal, setSelectedLangForModal] = useState(null);
   const [savedAsDefault, setSavedAsDefault] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const notificationRef = useRef(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const location = useLocation();
+
+  useEffect(() => {
+    if (!showNotifications) return;
+
+    const handleOutsideClick = (event) => {
+      if (notificationRef.current && !notificationRef.current.contains(event.target)) {
+        setShowNotifications(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
+
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, [showNotifications]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -197,7 +216,7 @@ const Layout = () => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-            <div style={{ position: 'relative' }}>
+            <div ref={notificationRef} style={{ position: 'relative' }}>
               <div onClick={() => setShowNotifications(!showNotifications)} style={{ cursor: 'pointer', color: '#5d4037', position: 'relative' }}>
                 <Bell size={22} />
                 {unreadCount > 0 && (

@@ -318,6 +318,47 @@ const getColumnHeaders = (lang = 'en') => {
 };
 
 /**
+ * Translate compliance status based on language
+ */
+const getComplianceStatusTranslation = (status, lang = 'en') => {
+  const translations = {
+    en: {
+      'PASSED': 'Passed',
+      'FAILED': 'Failed',
+      'WARNING': 'Warning'
+    },
+    hi: {
+      'PASSED': 'पास',
+      'FAILED': 'विफल',
+      'WARNING': 'चेतावनी'
+    },
+    gu: {
+      'PASSED': 'પાસ',
+      'FAILED': 'નિષ્ફળ',
+      'WARNING': 'ચેતવણી'
+    },
+    pa: {
+      'PASSED': 'ਪਾਸ',
+      'FAILED': 'ਅਸਫਲ',
+      'WARNING': 'ਚੇતਾਵਨੀ'
+    },
+    mr: {
+      'PASSED': 'पास',
+      'FAILED': 'अपयश',
+      'WARNING': 'चेतावणी'
+    },
+    bn: {
+      'PASSED': 'পাস',
+      'FAILED': 'ব্যর্থ',
+      'WARNING': 'সতর্কতা'
+    }
+  };
+
+  const langTranslations = translations[lang] || translations['en'];
+  return langTranslations[status] || status;
+};
+
+/**
  * Generate CSV content with language support and connection status
  */
 export const generateCSVContent = (trips, lang = 'en', connectionStatus = 'Connected') => {
@@ -348,6 +389,11 @@ export const generateCSVContent = (trips, lang = 'en', connectionStatus = 'Conne
       // Format datetime fields
       if (col === 'startTime' || col === 'endTime') {
         value = formatDateTime(value);
+      }
+
+      // Translate compliance status based on language
+      if (col === 'complianceStatus' && value) {
+        value = getComplianceStatusTranslation(value, lang);
       }
 
       // Ensure string values are quoted and escape quotes
